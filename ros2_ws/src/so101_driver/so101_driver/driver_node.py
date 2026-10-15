@@ -9,6 +9,7 @@ TODO:
   - Publish /joint_states in RADIANS (>= 20 Hz)
   - Subscribe to /joint_command (radians, gripper 0-100 %)
 """
+
 from pathlib import Path
 
 import rclpy
@@ -40,7 +41,9 @@ JOINT_STATE_HZ = 30.0
 
 
 def _gripper_pct_to_rad(pct: float) -> float:
-    raise NotImplementedError("TO DO")
+    pct = max(0.0, min(100.0, pct))  # clamp between 0 and 100
+    low, high = GRIPPER_RANGE_RAD
+    return low + (pct / 100.0) * (high - low)
 
 
 class DriverNode(rclpy.node.Node):
@@ -55,6 +58,19 @@ class DriverNode(rclpy.node.Node):
 
         self._robot = self._connect_arm(port)
         self.get_logger().info(f"Robot connected: {type(self._robot).__name__}")
+        self.get_logger().info(f"Obs: {self._robot.get_observation()}")
+
+        self.get_logger().info(f"Trad: {list(self._robot.get_observation().values())}")
+
+        self._joint_pub = self.create_publisher(JointState, "/joint_states", 10)
+        self._joint_sub = self.create_subscription(
+            JointState, "/joint_command", self._cb_joint_command, 10
+        )
+        self._state_timer = self.create_timer(
+            1.0 / JOINT_STATE_HZ, self._publish_joint_states
+        )
+        # if hasattr(self, "_control_step"):
+        #    self._control_timer = self.create_timer(1.0 / CONTROL_HZ, self._control_step)
 
         # TODO: create the publishers, subscribers and timers.
 
@@ -92,20 +108,41 @@ class DriverNode(rclpy.node.Node):
         return robot
 
     def destroy_node(self):
-        """Disconnects the backend (provided). On the real arm this disables the torque."""
         if self._robot.is_connected:
             self._robot.disconnect()
             self.get_logger().info("Robot disconnected.")
         super().destroy_node()
 
     def _cb_joint_command(self, msg: JointState):
-        raise NotImplementedError("TO DO")
+        # Map incoming joint names to their positions
+        cmd_map = dict(zip(msg.name, msg.position))
+
+        # Ensure all required joints are present
+        action = {}
+        for name in JOINT_NAMES:
+            if name in cmd_map:
+                # If the backend uses 'shoulder_pan.pos' keys:
+                key = (
+                    f"{name}.pos"
+                    if f"{name}.pos" in self._robot.get_observation()
+                    else name
+                )
+                action[key] = float(cmd_map[name])
+
+        # Send the converted dict to the robot backend
+        self._robot.send_action(action)
 
     def _control_step(self):
         raise NotImplementedError("TO DO")
 
     def _publish_joint_states(self):
-        raise NotImplementedError("TO DO")
+        msg = JointState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.name = JOINT_NAMES
+        pos_trad = list(self._robot.get_observation().values())
+        pos_trad[5] = _gripper_pct_to_rad(pos_trad[5])
+        msg.position = pos_trad
+        self._joint_pub.publish(msg)
 
 
 def main(args=None):
