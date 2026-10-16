@@ -134,7 +134,7 @@ class DriverNode(rclpy.node.Node):
             if name in cmd_map:
                 self._target_cmd[name] = float(cmd_map[name])
 
-     def _control_step(self):
+    def _control_step(self):
         if self._current_cmd is None or self._target_cmd is None:
             return
 
