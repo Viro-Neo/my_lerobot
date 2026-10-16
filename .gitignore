@@ -2,3 +2,8 @@ __pycache__/
 
 .env
 !.env.example
+.venv
+.python-version
+pyproject.toml
+src/
+ros2_ws/core
