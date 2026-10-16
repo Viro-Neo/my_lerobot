@@ -69,11 +69,13 @@ class DriverNode(rclpy.node.Node):
         self._state_timer = self.create_timer(
             1.0 / JOINT_STATE_HZ, self._publish_joint_states
         )
-        # if hasattr(self, "_control_step"):
-        #    self._control_timer = self.create_timer(1.0 / CONTROL_HZ, self._control_step)
 
-        # TODO: create the publishers, subscribers and timers.
+        self._current_cmd = None
+        self._target_cmd = None
+        self._arm_max_speed = 1.0  # radians per second
+        self._gripper_max_speed = 50.0  # percent per second
 
+        self._control_timer = self.create_timer(1.0 / CONTROL_HZ, self._control_step)
         self.get_logger().info("Driver node ready.")
 
     def _connect_arm(self, port: str = DEFAULT_PORT) -> SO101Sim | SO101Follower:
@@ -101,7 +103,7 @@ class DriverNode(rclpy.node.Node):
                 f"{CALIBRATION_FILE} does not match the motors: wrong file for this arm? "
                 "Re-run lerobot-calibrate on the host."
             )
-        robot.bus.disable_torque()  # Comment out this line to control the robot.
+        # robot.bus.disable_torque()  # Comment out this line to control the robot.
         self.get_logger().info(
             "Torque disabled: arm can be moved freely by hand. Remove this part to control the arm."
         )
@@ -117,23 +119,55 @@ class DriverNode(rclpy.node.Node):
         # Map incoming joint names to their positions
         cmd_map = dict(zip(msg.name, msg.position))
 
-        # Ensure all required joints are present
-        action = {}
+        # On the very first command, seed current_cmd with current positions
+        if self._current_cmd is None:
+            obs = self._robot.get_observation()
+            self._current_cmd = {}
+            for name in JOINT_NAMES:
+                key = f"{name}.pos" if f"{name}.pos" in obs else name
+                self._current_cmd[name] = float(obs[key])
+
+        if self._target_cmd is None:
+            self._target_cmd = dict(self._current_cmd)
+
         for name in JOINT_NAMES:
             if name in cmd_map:
-                # If the backend uses 'shoulder_pan.pos' keys:
-                key = (
-                    f"{name}.pos"
-                    if f"{name}.pos" in self._robot.get_observation()
-                    else name
-                )
-                action[key] = float(cmd_map[name])
+                self._target_cmd[name] = float(cmd_map[name])
 
-        # Send the converted dict to the robot backend
+     def _control_step(self):
+        if self._current_cmd is None or self._target_cmd is None:
+            return
+
+        dt = 1.0 / CONTROL_HZ
+        action = {}
+        moved = False
+
+        for name in JOINT_NAMES:
+            target = self._target_cmd[name]
+            current = self._current_cmd[name]
+            diff = target - current
+
+            # Use percent speed limit for gripper, rad/s for arm joints
+            speed = (
+                self._gripper_max_speed if name == "gripper" else self._arm_max_speed
+            )
+            max_step = speed * dt
+
+            if abs(diff) <= max_step:
+                self._current_cmd[name] = target
+            else:
+                self._current_cmd[name] += max_step if diff > 0 else -max_step
+                moved = True
+
+            key = (
+                f"{name}.pos"
+                if f"{name}.pos" in self._robot.get_observation()
+                else name
+            )
+            action[key] = self._current_cmd[name]
+
+        # Send action smoothly
         self._robot.send_action(action)
-
-    def _control_step(self):
-        raise NotImplementedError("TO DO")
 
     def _publish_joint_states(self):
         msg = JointState()
