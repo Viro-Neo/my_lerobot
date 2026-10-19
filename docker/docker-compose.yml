@@ -34,6 +34,7 @@ services:
       - 'c 166:* rmw'
       - 'c 188:* rmw'
     volumes:
+      - /dev:/dev
       - ../ros2_ws:/ros2_ws
       - ../sim:/opt/so101/sim
       - /tmp/.X11-unix:/tmp/.X11-unix
@@ -61,6 +62,29 @@ services:
       until [ -f /ros2_ws/install/setup.bash ] && [ -f /ros2_ws/install/so101_description/share/so101_description/launch/viz.launch.py ]; do echo 'waiting for build (control)...'; sleep 1; done &&
       cd /ros2_ws && source install/setup.bash &&
       ros2 launch so101_description viz.launch.py"
+
+  # Perception
+
+  perception:
+      build:
+        context: ..
+        dockerfile: docker/Dockerfile.perception
+      image: tek5/perception
+      init: true
+      environment:
+        <<: *ros-env
+      device_cgroup_rules:
+        - 'c 81:* rmw'
+      devices:
+        - /dev/video2:/dev/video2
+      volumes:
+        - ../ros2_ws:/ros2_ws
+      networks: [rosnet]
+      command: >
+        bash -lc "source /opt/ros/jazzy/setup.bash &&
+        until [ -f /ros2_ws/install/setup.bash ]; do sleep 1; done &&
+        source /ros2_ws/install/setup.bash &&
+        ros2 launch so101_perception perception.launch.py"
 
 networks:
   rosnet:

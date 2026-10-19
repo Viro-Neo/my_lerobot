@@ -10,6 +10,7 @@ TODO:
   - Intersect with the z=0 plane (table) to estimate the depth
   - Get cam_K / cam_T from the driver (params or CameraInfo)
 """
+
 import threading
 
 import cv2
@@ -32,7 +33,9 @@ class PerceptionNode(rclpy.node.Node):
     """Detects the golden ball and publishes its 3D position."""
 
     def __init__(self):
-        raise NotImplementedError("TO DO")
+        super().__init__("so101_perception")
+        self.get_logger().info("Perception node started (waiting for implementation).")
+        # TODO: Add subscribers and publishers here
 
     def _cb_camera_info(self, msg):
         raise NotImplementedError("TO DO")
@@ -53,5 +56,14 @@ class PerceptionNode(rclpy.node.Node):
         raise NotImplementedError("TO DO")
 
 
-def main():
-    raise NotImplementedError("TO DO")
+def main(args=None):
+    rclpy.init(args=args)
+    node = PerceptionNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
