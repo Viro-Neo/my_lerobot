@@ -15,6 +15,7 @@ name: tek5
 x-ros-env: &ros-env
   ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
   FASTDDS_BUILTIN_TRANSPORTS: LARGE_DATA
+  USE_SIM: ${USE_SIM:-true}
 
 services:
   control:
@@ -25,7 +26,6 @@ services:
     init: true
     environment:
       <<: *ros-env
-      USE_SIM: ${USE_SIM:-true}
       REAL_ROBOT_PORT: ${REAL_ROBOT_PORT:-/dev/ttyACM0}
       MUJOCO_GL: osmesa
       DISPLAY: ${DISPLAY}
@@ -75,9 +75,8 @@ services:
         <<: *ros-env
       device_cgroup_rules:
         - 'c 81:* rmw'
-      devices:
-        - /dev/video2:/dev/video2
       volumes:
+        - /dev:/dev
         - ../ros2_ws:/ros2_ws
       networks: [rosnet]
       command: >

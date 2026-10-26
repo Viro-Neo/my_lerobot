@@ -4,7 +4,7 @@
 TODO:
   - Subscribe to /external_cam/image_raw and /external_cam/camera_info
   - Publish /object_position (5-10 Hz)
-  - Segment the ball in HSV (yellow/gold)
+  - Segment the object in HSV
   - Find the contour center (u, v)
   - Project pixel -> 3D via K^{-1} and the camera->world TF
   - Intersect with the z=0 plane (table) to estimate the depth

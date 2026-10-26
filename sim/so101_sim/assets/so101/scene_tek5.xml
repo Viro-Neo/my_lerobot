@@ -66,7 +66,7 @@
 
         <!-- Fixed external camera (eye-to-hand), KNOWN pose: this is the reference
              camera->world TF. Looks at the workspace from above/the side. -->
-        <camera name="external_cam" pos="0.45 0.35 0.35" xyaxes="-0.707 0.707 0 -0.354 -0.354 0.866"
+        <camera name="external_cam" pos="0.45 0.25 0.35" xyaxes="-0.707 0.707 0 -0.354 -0.354 0.866"
             fovy="52" />
     </worldbody>
 </mujoco>
