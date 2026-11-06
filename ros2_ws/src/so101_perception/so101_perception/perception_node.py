@@ -21,13 +21,6 @@ from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import CameraInfo, Image
 
 
-# -- HSV ranges for the red cube --------------------------------------------
-# Values based on scene_tek5.xml comments (OpenCV HSV ~168, 185)
-# HSV_MIN = np.array([160, 150, 50], dtype=np.uint8)
-# HSV_MAX = np.array([180, 255, 255], dtype=np.uint8)
-
-
-# -- Corrected HSV ranges for the Red PLA cube (Hue ~ 168-180) --
 HSV_MIN = np.array([160, 100, 100], dtype=np.uint8)
 HSV_MAX = np.array([180, 255, 255], dtype=np.uint8)
 
@@ -40,17 +33,14 @@ class PerceptionNode(rclpy.node.Node):
         self._bridge = CvBridge()
         self._cam_k = None
 
-        # Declare parameters for camera extrinsics with your current MuJoCo defaults
         self.declare_parameter("cam_pos", [0.45, 0.25, 0.35])
         self.declare_parameter(
             "cam_xyaxes", [-0.707, 0.707, 0.0, -0.354, -0.354, 0.866]
         )
 
-        # Fetch the parameters and build the matrices
         self._cam_pos = np.array(self.get_parameter("cam_pos").value)
         xyaxes = np.array(self.get_parameter("cam_xyaxes").value)
 
-        # Build the rotation matrix
         x_axis = xyaxes[0:3]
         y_axis = xyaxes[3:6]
         z_axis = np.cross(x_axis, y_axis)
@@ -63,6 +53,10 @@ class PerceptionNode(rclpy.node.Node):
             Image, "/external_cam/image_raw", self._cb_image, 10
         )
         self._pose_pub = self.create_publisher(PoseStamped, "/object_position", 10)
+        self._annotated_pub = self.create_publisher(
+            Image, "/perception/annotated_image", 10
+        )
+        self._dropbox_pub = self.create_publisher(PoseStamped, "/drop_box_position", 10)
 
         self.get_logger().info("Perception node ready.")
 
@@ -75,18 +69,57 @@ class PerceptionNode(rclpy.node.Node):
             return
 
         cv_image = self._bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
-        u, v = self._detect_object(cv_image)
+        u, v, contour = self._detect_object(cv_image)
 
         if u is not None and v is not None:
             pos_3d = self._project_to_3d(u, v)
             if pos_3d is not None:
                 self._publish_result(pos_3d, msg.header.stamp)
 
+        # 1. Publish the static Drop Box Position
+        box_msg = PoseStamped()
+        box_msg.header.stamp = self.get_clock().now().to_msg()
+        box_msg.header.frame_id = "world"
+        box_msg.pose.position.x = 0.05
+        box_msg.pose.position.y = -0.25
+        box_msg.pose.position.z = 0.025
+        box_msg.pose.orientation.w = 1.0
+        self._dropbox_pub.publish(box_msg)
+
+        # 2. Draw the contour of the cube
+        if contour is not None:
+            cv2.drawContours(cv_image, [contour], -1, (0, 255, 0), 1)
+
+        # 3. Project the 3D Drop Box corners onto the 2D image
+        # The box is centered at X=0.05, Y=-0.25 and is 0.10m wide.
+        box_corners_3d = [
+            (0.00, -0.20, 0.05),  # Top-Left
+            (0.10, -0.20, 0.05),  # Top-Right
+            (0.10, -0.30, 0.05),  # Bottom-Right
+            (0.00, -0.30, 0.05),  # Bottom-Left
+        ]
+
+        box_pixels = []
+        for pt in box_corners_3d:
+            uv = self._project_3d_to_pixel(pt)
+            if uv is not None:
+                box_pixels.append(uv)
+
+        if len(box_pixels) == 4:
+            # Draw the projected polygon
+            pts_array = np.array(box_pixels, dtype=np.int32)
+            cv2.polylines(
+                cv_image, [pts_array], isClosed=True, color=(255, 0, 0), thickness=1
+            )
+
+        # 3. Publish the annotated image to the NEW topic
+        annotated_msg = self._bridge.cv2_to_imgmsg(cv_image, encoding="bgr8")
+        annotated_msg.header = msg.header
+        self._annotated_pub.publish(annotated_msg)
+
     def _detect_object(self, cv_image):
         hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
 
-        # mask = cv2.inRange(hsv, HSV_MIN, HSV_MAX)
-        # Red wraps around the HSV spectrum in OpenCV (0-10 and 160-179)
         mask1 = cv2.inRange(hsv, np.array([0, 100, 100]), np.array([10, 255, 255]))
         mask2 = cv2.inRange(hsv, np.array([160, 100, 100]), np.array([179, 255, 255]))
         mask = cv2.bitwise_or(mask1, mask2)
@@ -102,47 +135,41 @@ class PerceptionNode(rclpy.node.Node):
 
         M = cv2.moments(largest_contour)
         if M["m00"] > 0:
-            return int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
+            return int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]), largest_contour
         return None, None
-
-    # def _project_to_3d(self, u, v):
-    #     """Projects a 2D pixel to the z=0 plane using the known extrinsics."""
-    #     # Ray in camera frame
-    #     ray_cam = np.linalg.inv(self._cam_k) @ np.array([u, v, 1.0])
-    #     ray_cam /= np.linalg.norm(ray_cam)
-
-    #     # Ray in world frame
-    #     ray_world = self._cam_rot @ ray_cam
-
-    #     # Intersect with z=0 (table)
-    #     if abs(ray_world[2]) < 1e-6:
-    #         return None
-
-    #     t = -self._cam_pos[2] / ray_world[2]
-    #     return self._cam_pos + t * ray_world
 
     def _project_to_3d(self, u, v):
         """Projects a 2D pixel to the Z=0.025 plane using the known extrinsics."""
-        # 1. Ray in OpenCV camera frame (Z forward, Y down, X right)
         ray_cv = np.linalg.inv(self._cam_k) @ np.array([u, v, 1.0])
-
-        # 2. Convert to MuJoCo camera frame (Z backward, Y up, X right)
         ray_mj = np.array([ray_cv[0], -ray_cv[1], -ray_cv[2]])
         ray_mj /= np.linalg.norm(ray_mj)
-
-        # 3. Ray in World frame
         ray_world = self._cam_rot @ ray_mj
 
-        # 4. Intersect with cube center height (Z = 0.025)
-        # Equation: cam_pos.z + t * ray_world.z = 0.025
         if abs(ray_world[2]) < 1e-6:
             return None
 
         t = (0.025 - self._cam_pos[2]) / ray_world[2]
         if t < 0:
-            return None  # Ray is pointing away from the table
+            return None
 
         return self._cam_pos + t * ray_world
+
+    def _project_3d_to_pixel(self, pt_3d):
+        """Projects a 3D world coordinate back to a 2D camera pixel."""
+        # Vector from camera to 3D point
+        ray_world = np.array(pt_3d) - self._cam_pos
+        # Reverse the rotation to get into MuJoCo camera frame
+        ray_mj = self._cam_rot.T @ ray_world
+        # Convert MuJoCo frame to OpenCV frame
+        ray_cv = np.array([ray_mj[0], -ray_mj[1], -ray_mj[2]])
+
+        if ray_cv[2] <= 0:
+            return None  # Point is behind the camera
+
+        # Normalize and apply intrinsics
+        ray_cv /= ray_cv[2]
+        uv = self._cam_k @ ray_cv
+        return int(uv[0]), int(uv[1])
 
     def _publish_result(self, pos_3d, stamp):
         msg = PoseStamped()

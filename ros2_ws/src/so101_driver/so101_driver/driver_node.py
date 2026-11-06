@@ -16,11 +16,10 @@ import rclpy
 import rclpy.node
 from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
 from rclpy.executors import ExternalShutdownException
-from sensor_msgs.msg import JointState
+from sensor_msgs.msg import JointState, Image, CameraInfo
 from so101_sim import SO101Sim
 
 import numpy as np
-from sensor_msgs.msg import Image, CameraInfo
 from cv_bridge import CvBridge
 
 JOINT_NAMES = [
@@ -31,6 +30,7 @@ JOINT_NAMES = [
     "wrist_roll",
     "gripper",
 ]
+ARM_JOINT_NAMES = JOINT_NAMES[:5]
 
 # Gripper joint limits in the URDF (rad).
 # LeRobot convention: 0 % = closed (lower), 100 % = open (upper).
@@ -42,10 +42,11 @@ DEFAULT_PORT = "/dev/ttyACM0"
 
 CONTROL_HZ = 50.0
 JOINT_STATE_HZ = 30.0
+CAMERA_HZ = 10.0
 
 
 def _gripper_pct_to_rad(pct: float) -> float:
-    pct = max(0.0, min(100.0, pct))  # clamp between 0 and 100
+    pct = max(0.0, min(100.0, pct))
     low, high = GRIPPER_RANGE_RAD
     return low + (pct / 100.0) * (high - low)
 
@@ -71,7 +72,6 @@ class DriverNode(rclpy.node.Node):
             JointState, "/joint_command", self._cb_joint_command, 10
         )
 
-        # ADD THIS: Initialize camera publishers for simulation
         if self._use_sim:
             self._image_pub = self.create_publisher(Image, "/external_cam/image_raw", 1)
             self._info_pub = self.create_publisher(
@@ -134,10 +134,8 @@ class DriverNode(rclpy.node.Node):
         super().destroy_node()
 
     def _cb_joint_command(self, msg: JointState):
-        # Map incoming joint names to their positions
         cmd_map = dict(zip(msg.name, msg.position))
 
-        # On the very first command, seed current_cmd with current positions
         if self._current_cmd is None:
             obs = self._robot.get_observation()
             self._current_cmd = {}
@@ -165,7 +163,6 @@ class DriverNode(rclpy.node.Node):
             current = self._current_cmd[name]
             diff = target - current
 
-            # Use percent speed limit for gripper, rad/s for arm joints
             speed = (
                 self._gripper_max_speed if name == "gripper" else self._arm_max_speed
             )
@@ -184,22 +181,11 @@ class DriverNode(rclpy.node.Node):
             )
             action[key] = self._current_cmd[name]
 
-        # Send action smoothly
         self._robot.send_action(action)
-
-    # def _publish_joint_states(self):
-    #     msg = JointState()
-    #     msg.header.stamp = self.get_clock().now().to_msg()
-    #     msg.name = JOINT_NAMES
-    #     pos_trad = list(self._robot.get_observation().values())
-    #     pos_trad[5] = _gripper_pct_to_rad(pos_trad[5])
-    #     msg.position = pos_trad
-    #     self._joint_pub.publish(msg)
 
     def _publish_joint_states(self):
         obs = self._robot.get_observation()
 
-        # 1. Publish Joint States
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.name = JOINT_NAMES
@@ -215,18 +201,14 @@ class DriverNode(rclpy.node.Node):
         msg.position = pos_trad
         self._joint_pub.publish(msg)
 
-        # 2. Publish Simulated Camera Feed
         if self._use_sim and hasattr(self._robot, "render_camera"):
-            # Call explicitly as required by SO101Sim
             frame = self._robot.render_camera()
 
             if frame is not None and isinstance(frame, np.ndarray):
-                # Convert to ROS Image message
                 img_msg = self._bridge.cv2_to_imgmsg(frame, encoding="rgb8")
                 img_msg.header.stamp = msg.header.stamp
                 img_msg.header.frame_id = "external_camera_optical_frame"
 
-                # Fetch exact intrinsics from the simulation backend
                 K = self._robot.get_camera_intrinsics()
                 height, width = frame.shape[:2]
 
@@ -237,10 +219,8 @@ class DriverNode(rclpy.node.Node):
                 info_msg.distortion_model = "plumb_bob"
                 info_msg.d = [0.0, 0.0, 0.0, 0.0, 0.0]
 
-                # Flatten the 3x3 K matrix into a 1D array of 9 elements
                 info_msg.k = K.flatten().tolist()
                 info_msg.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-                # P matrix: [fx, 0, cx, 0;  0, fy, cy, 0;  0, 0, 1, 0]
                 info_msg.p = [
                     K[0, 0],
                     0.0,

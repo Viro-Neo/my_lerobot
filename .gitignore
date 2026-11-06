@@ -5,5 +5,4 @@ __pycache__/
 .venv
 .python-version
 pyproject.toml
-src/
 ros2_ws/core

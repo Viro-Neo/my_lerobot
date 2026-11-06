@@ -144,10 +144,6 @@ class BrainNode(rclpy.node.Node):
         if self.model is None:
             return None
 
-        # 1. Seed the IK with a perfect "Hovering" posture instead of q_current.
-        # This forces the math to start from an elbow-up/gripper-down stance,
-        # preventing it from ever considering the upside-down/floor solutions.
-        # (Note: Signs adjusted for standard upward elbow configuration)
         q_reference = np.array([0.0, -0.8, 1.2, 1.2, 0.0, 0.0])
         q = q_reference.copy()
 
@@ -161,7 +157,6 @@ class BrainNode(rclpy.node.Node):
             if np.linalg.norm(err) < eps:
                 return q
 
-            # 2. Use 3D Position Jacobian (because it's a 5-DoF arm)
             J = pin.computeFrameJacobian(
                 self.model,
                 self.data,
@@ -173,16 +168,13 @@ class BrainNode(rclpy.node.Node):
 
             v = np.linalg.pinv(J_pos) @ err
 
-            # 3. Aggressive Null-space projection to lock the elbow up
             null_space_matrix = np.eye(self.model.nv) - np.linalg.pinv(J_pos) @ J_pos
             posture_err = q_reference - q
 
-            # Higher gain (0.5 instead of 0.1) pulls it strongly to the reference posture
             v += null_space_matrix @ (posture_err * 0.5)
 
             q = pin.integrate(self.model, q, v * 0.1)
 
-            # 4. Enforce URDF Joint Limits so the arm literally cannot clip through the floor
             q = np.clip(q, self.model.lowerPositionLimit, self.model.upperPositionLimit)
 
         self.get_logger().warning(
@@ -250,12 +242,10 @@ class BrainNode(rclpy.node.Node):
                 self._transition(PickPlaceState.RELEASE)
 
         elif self.state == PickPlaceState.RELEASE:
-            # 1. Copy the drop position and nudge it closer to the box center
             release_target = self.drop_pos.copy()
-            release_target[0] -= 0.03  # Move slightly forward in X
-            release_target[1] -= 0.03  # Move slightly outward in Y
+            release_target[0] -= 0.03
+            release_target[1] -= 0.03
 
-            # q_target = self.solve_ik(self.drop_pos)
             q_target = self.solve_ik(release_target)
 
             if q_target is not None:
