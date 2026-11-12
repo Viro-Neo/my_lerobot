@@ -11,14 +11,15 @@ TODO:
 """
 
 import time
+from enum import Enum
+
 import numpy as np
 import pinocchio as pin
 import rclpy
 import rclpy.node
-from enum import Enum
-from rclpy.qos import QoSProfile, QoSDurabilityPolicy
-from rclpy.executors import ExternalShutdownException
 from geometry_msgs.msg import PoseStamped
+from rclpy.executors import ExternalShutdownException
+from rclpy.qos import QoSDurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 from std_srvs.srv import Trigger

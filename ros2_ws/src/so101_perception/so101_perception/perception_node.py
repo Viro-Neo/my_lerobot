@@ -11,15 +11,15 @@ TODO:
   - Get cam_K / cam_T from the driver (params or CameraInfo)
 """
 
+import xml.etree.ElementTree as ET
+
 import cv2
 import numpy as np
 import rclpy
 import rclpy.node
-import xml.etree.ElementTree as ET
 from cv_bridge import CvBridge
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import CameraInfo, Image
-
 
 HSV_MIN = np.array([160, 100, 100], dtype=np.uint8)
 HSV_MAX = np.array([180, 255, 255], dtype=np.uint8)
@@ -32,11 +32,6 @@ class PerceptionNode(rclpy.node.Node):
         super().__init__("so101_perception")
         self._bridge = CvBridge()
         self._cam_k = None
-
-        self.declare_parameter("cam_pos", [0.45, 0.25, 0.35])
-        self.declare_parameter(
-            "cam_xyaxes", [-0.707, 0.707, 0.0, -0.354, -0.354, 0.866]
-        )
 
         self._cam_pos = np.array(self.get_parameter("cam_pos").value)
         xyaxes = np.array(self.get_parameter("cam_xyaxes").value)

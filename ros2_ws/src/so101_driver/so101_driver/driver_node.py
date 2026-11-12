@@ -12,15 +12,14 @@ TODO:
 
 from pathlib import Path
 
+import numpy as np
 import rclpy
 import rclpy.node
+from cv_bridge import CvBridge
 from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
 from rclpy.executors import ExternalShutdownException
-from sensor_msgs.msg import JointState, Image, CameraInfo
+from sensor_msgs.msg import CameraInfo, Image, JointState
 from so101_sim import SO101Sim
-
-import numpy as np
-from cv_bridge import CvBridge
 
 JOINT_NAMES = [
     "shoulder_pan",
