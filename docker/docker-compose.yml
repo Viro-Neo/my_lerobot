@@ -33,6 +33,7 @@ services:
     device_cgroup_rules:  # Grant permissions to access usb serial devices (real arm)
       - 'c 166:* rmw'
       - 'c 188:* rmw'
+      - 'c 81:* rmw'
     volumes:
       - /dev:/dev
       - ../ros2_ws:/ros2_ws

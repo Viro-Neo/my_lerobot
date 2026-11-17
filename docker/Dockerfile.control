@@ -19,13 +19,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-joint-state-publisher \
     ros-jazzy-rviz2 \
     ros-jazzy-pinocchio \
+    ros-jazzy-rqt-graph \
+    ros-jazzy-rqt-image-view \
+    ros-jazzy-v4l2-camera \
+    ros-jazzy-camera-calibration \
     && rm -rf /var/lib/apt/lists/*
 
 # Provided packages (driver + sim) and ikpy for the IK.
 COPY core/lerobot_min /opt/so101/core
 COPY sim /opt/so101/sim
 RUN pip install --break-system-packages --no-cache-dir \
-    "numpy<2" "opencv-python-headless==4.10.*" /opt/so101/core /opt/so101/sim ikpy
+    "numpy<2" "opencv-python==4.10.*" /opt/so101/core /opt/so101/sim ikpy
 
 # ROS2 workspace mounted as a volume (see docker-compose.yml)
 WORKDIR /ros2_ws

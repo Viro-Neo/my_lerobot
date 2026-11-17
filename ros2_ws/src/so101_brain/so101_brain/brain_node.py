@@ -11,14 +11,15 @@ TODO:
 """
 
 import time
+from enum import Enum
+
 import numpy as np
 import pinocchio as pin
 import rclpy
 import rclpy.node
-from enum import Enum
-from rclpy.qos import QoSProfile, QoSDurabilityPolicy
-from rclpy.executors import ExternalShutdownException
 from geometry_msgs.msg import PoseStamped
+from rclpy.executors import ExternalShutdownException
+from rclpy.qos import QoSDurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
@@ -49,6 +50,13 @@ class BrainNode(rclpy.node.Node):
 
     def __init__(self):
         super().__init__("so101_brain")
+
+        # Determine if we are in simulation or reality
+        self.declare_parameter("use_sim", True)
+        self._use_sim = self.get_parameter("use_sim").value
+
+        # Simulation grabs at +1.5cm. Reality pushes down to -1.5cm.
+        self.grasp_z_offset = 0.015 if self._use_sim else -0.025
 
         self.model = None
         self.data = None
@@ -213,15 +221,16 @@ class BrainNode(rclpy.node.Node):
 
         elif self.state == PickPlaceState.DESCEND:
             target = self.target_obj_pos.copy()
-            target[2] += 0.015
+            target[2] += self.grasp_z_offset
             q_target = self.solve_ik(target)
+
             self.send_joint_command(q_target, gripper_pct=50.0)
             if elapsed > 5.0:
                 self._transition(PickPlaceState.GRASP)
 
         elif self.state == PickPlaceState.GRASP:
             target = self.target_obj_pos.copy()
-            target[2] += 0.015
+            target[2] += self.grasp_z_offset
             q_target = self.solve_ik(target)
             self.send_joint_command(q_target, gripper_pct=0.0)
             if elapsed > 5.0:
@@ -243,13 +252,13 @@ class BrainNode(rclpy.node.Node):
 
         elif self.state == PickPlaceState.RELEASE:
             release_target = self.drop_pos.copy()
+
             release_target[0] -= 0.03
             release_target[1] -= 0.03
 
             q_target = self.solve_ik(release_target)
 
-            if q_target is not None:
-                q_target[3] += 0.25
+            q_target[3] += 0.3
 
             self.send_joint_command(q_target, gripper_pct=50.0)
             if elapsed > 5.0:
@@ -259,7 +268,10 @@ class BrainNode(rclpy.node.Node):
             q_target = self.solve_ik(self.home_pos)
             self.send_joint_command(q_target, gripper_pct=50.0)
             if elapsed > 5.0:
-                pass
+                # Reset variables so it waits for the next /brain/start trigger
+                self.is_running = False
+                self.target_obj_pos = None
+                self._transition(PickPlaceState.IDLE)
 
 
 def main(args=None):

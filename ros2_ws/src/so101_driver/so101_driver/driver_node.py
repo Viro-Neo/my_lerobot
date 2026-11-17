@@ -12,15 +12,14 @@ TODO:
 
 from pathlib import Path
 
+import numpy as np
 import rclpy
 import rclpy.node
+from cv_bridge import CvBridge
 from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
 from rclpy.executors import ExternalShutdownException
-from sensor_msgs.msg import JointState, Image, CameraInfo
+from sensor_msgs.msg import CameraInfo, Image, JointState
 from so101_sim import SO101Sim
-
-import numpy as np
-from cv_bridge import CvBridge
 
 JOINT_NAMES = [
     "shoulder_pan",
@@ -122,9 +121,9 @@ class DriverNode(rclpy.node.Node):
                 "Re-run lerobot-calibrate on the host."
             )
         # robot.bus.disable_torque()  # Comment out this line to control the robot.
-        self.get_logger().info(
-            "Torque disabled: arm can be moved freely by hand. Remove this part to control the arm."
-        )
+        # self.get_logger().info(
+        #     "Torque disabled: arm can be moved freely by hand. Remove this part to control the arm."
+        # )
         return robot
 
     def destroy_node(self):

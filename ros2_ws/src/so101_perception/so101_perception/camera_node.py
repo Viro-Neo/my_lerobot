@@ -20,11 +20,15 @@ class CameraNode(rclpy.node.Node):
         self.declare_parameter("fps", 30.0)
         self.declare_parameter("width", 640)
         self.declare_parameter("height", 480)
-
         self.declare_parameter("fx", 500.0)
         self.declare_parameter("fy", 500.0)
         self.declare_parameter("cx", 320.0)
         self.declare_parameter("cy", 240.0)
+        self.declare_parameter("k1", 0.0)
+        self.declare_parameter("k2", 0.0)
+        self.declare_parameter("p1", 0.0)
+        self.declare_parameter("p2", 0.0)
+        self.declare_parameter("k3", 0.0)
 
         self._device_index = self.get_parameter("device_index").value
         self._frame_id = self.get_parameter("frame_id").value
@@ -66,12 +70,18 @@ class CameraNode(rclpy.node.Node):
         cx = self.get_parameter("cx").value
         cy = self.get_parameter("cy").value
 
+        k1 = self.get_parameter("k1").value
+        k2 = self.get_parameter("k2").value
+        p1 = self.get_parameter("p1").value
+        p2 = self.get_parameter("p2").value
+        k3 = self.get_parameter("k3").value
+
         info = CameraInfo()
         info.header.frame_id = self._frame_id
         info.width = self._width
         info.height = self._height
         info.distortion_model = "plumb_bob"
-        info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
+        info.d = [k1, k2, p1, p2, k3]
 
         info.k = [
             fx,

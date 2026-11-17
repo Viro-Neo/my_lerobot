@@ -6,9 +6,8 @@ semi-transparent red Cube marker on /drop_box_marker for RViz.
 """
 
 import rclpy
-from rclpy.node import Node
-
 from geometry_msgs.msg import PoseStamped
+from rclpy.node import Node
 from visualization_msgs.msg import Marker
 
 
@@ -59,11 +58,13 @@ class DropBoxMarkerPublisher(Node):
 
     def _cb_box_position(self, msg: PoseStamped) -> None:
         self._marker.header.stamp = self.get_clock().now().to_msg()
+        self._marker.header.frame_id = "base_link"
         self._marker.pose = msg.pose
         self._pub.publish(self._marker)
 
     def _cb_obj_position(self, msg: PoseStamped) -> None:
         self._marker_obj.header.stamp = self.get_clock().now().to_msg()
+        self._marker_obj.header.frame_id = "base_link"
         self._marker_obj.pose = msg.pose
 
         # Ensure the visual marker sits exactly on the table (Z = 0.025 for a 5cm cube)
