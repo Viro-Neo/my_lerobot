@@ -20,9 +20,6 @@ from geometry_msgs.msg import PoseStamped, TransformStamped
 from sensor_msgs.msg import CameraInfo, Image
 from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 
-HSV_MIN = np.array([160, 100, 100], dtype=np.uint8)
-HSV_MAX = np.array([180, 255, 255], dtype=np.uint8)
-
 
 class PerceptionNode(rclpy.node.Node):
     """Detects the object and publishes its 3D position."""

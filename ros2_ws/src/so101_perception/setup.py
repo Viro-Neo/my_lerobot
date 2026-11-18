@@ -17,6 +17,7 @@ setup(
         "console_scripts": [
             "perception_node = so101_perception.perception_node:main",
             "camera_node = so101_perception.camera_node:main",
+            "yolo_perception_node = so101_perception.yolo_perception_node:main",
         ],
     },
 )

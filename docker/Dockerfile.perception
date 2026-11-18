@@ -16,8 +16,8 @@ RUN pip install --break-system-packages --no-cache-dir "opencv-python-headless==
 
 # To extend this image:
 # FROM tek5/perception
-# RUN pip install --break-system-packages --no-cache-dir \
-#    ultralytics "numpy<2" "opencv-python==4.10.*"
+RUN pip install --break-system-packages --no-cache-dir \
+   ultralytics "numpy<2" "opencv-python==4.10.*"
 
 WORKDIR /ros2_ws
 CMD ["bash", "-lc", "source /opt/ros/jazzy/setup.bash && bash"]

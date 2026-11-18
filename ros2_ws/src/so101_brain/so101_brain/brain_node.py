@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""brain_node.py - intelligence of the arm: kinematics, then pick & place.
-
-Never talks to the backend: reads /joint_states, commands through /joint_command.
-
-TODO:
-  - Forward kinematics: from /joint_states, publish the TCP pose
-    (e.g. /end_effector_pose, geometry_msgs/PoseStamped) and show it in RViz
-  - Inverse kinematics: reach an XYZ target (ikpy and pinocchio are installed)
-  - Later: pick & place state machine
-"""
+"""brain_node.py - intelligence of the arm: kinematics, then pick & place."""
 
 import time
 from enum import Enum
@@ -68,6 +59,8 @@ class BrainNode(rclpy.node.Node):
         self.target_obj_pos = None
 
         self.is_running = False
+        self.target_obj_pos_yolo = None
+        self.active_mode = None  # Will be "HSV" or "YOLO"
 
         self.drop_pos = np.array([0.10, -0.20, 0.15])
         self.home_pos = np.array([0.15, 0.0, 0.15])
@@ -80,9 +73,14 @@ class BrainNode(rclpy.node.Node):
         self.create_subscription(
             PoseStamped, "/object_position", self._cb_object_position, 10
         )
+        self.create_subscription(
+            PoseStamped, "/yolo_object_position", self._cb_yolo_position, 10
+        )
 
         self.create_service(Trigger, "/brain/start", self._cb_start)
         self.create_service(Trigger, "/brain/stop", self._cb_stop)
+
+        self.create_service(Trigger, "/brain/start_yolo", self._cb_start_yolo)
 
         self._tcp_pub = self.create_publisher(PoseStamped, "/end_effector_pose", 10)
         self._cmd_pub = self.create_publisher(JointState, "/joint_command", 10)
@@ -113,6 +111,7 @@ class BrainNode(rclpy.node.Node):
             )
 
     def _cb_start(self, request, response):
+        self.active_mode = "HSV"
         self.is_running = True
         response.success = True
         response.message = "Brain started. Will pick up object when detected."
@@ -126,6 +125,19 @@ class BrainNode(rclpy.node.Node):
             "Brain stopped. Will return to IDLE after current cycle or wait."
         )
         self.get_logger().info("Received STOP command.")
+        return response
+
+    def _cb_yolo_position(self, msg):
+        if self.state == PickPlaceState.IDLE:
+            self.target_obj_pos_yolo = np.array(
+                [msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]
+            )
+
+    def _cb_start_yolo(self, request, response):
+        self.active_mode = "YOLO"
+        self.is_running = True
+        response.success = True
+        response.message = "Phase 2 (YOLO) sequence started."
         return response
 
     def _forward_kinematics(self, q):
@@ -208,8 +220,15 @@ class BrainNode(rclpy.node.Node):
         elapsed = time.time() - self.state_start_time
 
         if self.state == PickPlaceState.IDLE:
-            if self.is_running and self.target_obj_pos is not None:
-                self._transition(PickPlaceState.HOVER)
+            if self.is_running:
+                if self.active_mode == "HSV" and self.target_obj_pos is not None:
+                    self.target_obj_pos = self.target_obj_pos.copy()
+                    self._transition(PickPlaceState.HOVER)
+                elif (
+                    self.active_mode == "YOLO" and self.target_obj_pos_yolo is not None
+                ):
+                    self.target_obj_pos = self.target_obj_pos_yolo.copy()
+                    self._transition(PickPlaceState.HOVER)
 
         elif self.state == PickPlaceState.HOVER:
             target = self.target_obj_pos.copy()
@@ -236,7 +255,32 @@ class BrainNode(rclpy.node.Node):
             if elapsed > 5.0:
                 self._transition(PickPlaceState.LIFT)
 
+        # elif self.state == PickPlaceState.LIFT:
+        #     target = self.target_obj_pos.copy()
+        #     target[2] += 0.15
+        #     q_target = self.solve_ik(target)
+        #     self.send_joint_command(q_target, gripper_pct=0.0)
+        #     if elapsed > 5.0:
+        #         self._transition(PickPlaceState.MOVE_DROP)
+
+        # elif self.state == PickPlaceState.MOVE_DROP:
+        #     q_target = self.solve_ik(self.drop_pos)
+        #     self.send_joint_command(q_target, gripper_pct=0.0)
+        #     if elapsed > 5.0:
+        #         self._transition(PickPlaceState.RELEASE)
+
         elif self.state == PickPlaceState.LIFT:
+            current_target = (
+                self.target_obj_pos_yolo
+                if self.active_mode == "YOLO"
+                else self.target_obj_pos
+            )
+            if current_target is not None:
+                self.get_logger().warning("Cube dropped! Resetting to HOVER.")
+                self.send_joint_command(self.q_current, gripper_pct=50.0)
+                self._transition(PickPlaceState.HOVER)
+                return
+
             target = self.target_obj_pos.copy()
             target[2] += 0.15
             q_target = self.solve_ik(target)
@@ -245,6 +289,17 @@ class BrainNode(rclpy.node.Node):
                 self._transition(PickPlaceState.MOVE_DROP)
 
         elif self.state == PickPlaceState.MOVE_DROP:
+            current_target = (
+                self.target_obj_pos_yolo
+                if self.active_mode == "YOLO"
+                else self.target_obj_pos
+            )
+            if current_target is not None:
+                self.get_logger().warning("Cube dropped! Resetting to HOVER.")
+                self.send_joint_command(self.q_current, gripper_pct=50.0)
+                self._transition(PickPlaceState.HOVER)
+                return
+
             q_target = self.solve_ik(self.drop_pos)
             self.send_joint_command(q_target, gripper_pct=0.0)
             if elapsed > 5.0:

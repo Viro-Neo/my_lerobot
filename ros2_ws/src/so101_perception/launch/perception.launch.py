@@ -13,11 +13,11 @@ def generate_launch_description():
     is_sim = env_use_sim == "true"
 
     # Choose the correct extrinsic matrices based on USE_SIM
-    cam_pos = [0.45, 0.25, 0.35] if is_sim else [0.0810, -0.5673, 0.4207]
+    cam_pos = [0.45, 0.25, 0.35] if is_sim else [0.1295, -0.5699, 0.4229]
     cam_xyaxes = (
         [-0.707, 0.707, 0.0, -0.354, -0.354, 0.866]
         if is_sim
-        else [0.9939, 0.0615, 0.0913, 0.1101, -0.5456, -0.8308]
+        else [0.9883, 0.1178, 0.0965, 0.1453, -0.5410, -0.8284]
     )
 
     return LaunchDescription(
@@ -66,6 +66,17 @@ def generate_launch_description():
                     {"k3": 0.000000},
                 ],
                 condition=UnlessCondition(str(is_sim == "true")),
+            ),
+            Node(
+                package="so101_perception",
+                executable="yolo_perception_node",
+                name="yolo_perception_node",
+                output="screen",
+                parameters=[
+                    {"use_sim": is_sim},
+                    {"cam_pos": cam_pos},
+                    {"cam_xyaxes": cam_xyaxes},
+                ],
             ),
         ]
     )

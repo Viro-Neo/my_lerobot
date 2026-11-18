@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""driver_node.py - ROS2 driver of the SO-ARM101.
-
-The only node that talks to the backend: SO101Sim (MuJoCo) or SO101Follower
-(real arm), chosen by the `use_sim` parameter. The rest of the stack never
-knows which one runs.
-
-TODO:
-  - Publish /joint_states in RADIANS (>= 20 Hz)
-  - Subscribe to /joint_command (radians, gripper 0-100 %)
-"""
+"""driver_node.py - ROS2 driver of the SO-ARM101."""
 
 from pathlib import Path
 
