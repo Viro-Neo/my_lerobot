@@ -65,7 +65,7 @@ def generate_launch_description():
                     {"p2": 0.004427},
                     {"k3": 0.000000},
                 ],
-                condition=UnlessCondition(str(is_sim == "true")),
+                condition=UnlessCondition(env_use_sim),
             ),
             Node(
                 package="so101_perception",

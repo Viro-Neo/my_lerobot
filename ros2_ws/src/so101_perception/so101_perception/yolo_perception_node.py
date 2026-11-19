@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """yolo_perception_node.py — object detection and 3D registration using yolo."""
 
+import time
+
 import cv2
 import numpy as np
 import rclpy
@@ -20,7 +22,9 @@ class PerceptionNode(rclpy.node.Node):
         self._bridge = CvBridge()
         self._cam_k = None
         self._cam_d = None
-        self.model = YOLO("yolov8n.pt")
+        # self.model = YOLO("yolov8n.pt")
+        self.model = YOLO("yolov8s-worldv2.pt")
+        self.model.set_classes(["red cube", "red object", "toy"])
 
         self.declare_parameter("use_sim", True)
         self.declare_parameter("cam_pos", [0.45, 0.25, 0.35])
@@ -37,17 +41,14 @@ class PerceptionNode(rclpy.node.Node):
         z_axis = np.cross(x_axis, y_axis)
         self._cam_rot = np.column_stack((x_axis, y_axis, z_axis))
 
+        self._last_infer_time = 0.0
+
         self._info_sub = self.create_subscription(
             CameraInfo, "/external_cam/camera_info", self._cb_camera_info, 10
         )
         self._image_sub = self.create_subscription(
-            Image, "/external_cam/image_raw", self._cb_image, 10
+            Image, "/external_cam/image_raw", self._cb_image, 1
         )
-        # self._pose_pub = self.create_publisher(PoseStamped, "/object_position", 10)
-        # self._annotated_pub = self.create_publisher(
-        #     Image, "/perception/annotated_image", 10
-        # )
-
         self._pose_pub = self.create_publisher(PoseStamped, "/yolo_object_position", 10)
         self._annotated_pub = self.create_publisher(
             Image, "/perception/yolo_annotated_image", 10
@@ -67,6 +68,12 @@ class PerceptionNode(rclpy.node.Node):
     def _cb_image(self, msg):
         if self._cam_k is None or self._cam_d is None:
             return
+
+        # Limit YOLO processing to 5 Hz (once every 0.2 seconds)
+        now = time.time()
+        if (now - self._last_infer_time) < 0.2:
+            return
+        self._last_infer_time = now
 
         raw_cv_image = self._bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
 
@@ -122,58 +129,60 @@ class PerceptionNode(rclpy.node.Node):
         annotated_msg.header = msg.header
         self._annotated_pub.publish(annotated_msg)
 
-    # def _detect_object(self, cv_image):
-    #     hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
-
-    #     mask1 = cv2.inRange(hsv, np.array([0, 100, 100]), np.array([10, 255, 255]))
-    #     mask2 = cv2.inRange(hsv, np.array([160, 100, 100]), np.array([179, 255, 255]))
-    #     mask = cv2.bitwise_or(mask1, mask2)
-
-    #     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    #     if not contours:
-    #         return None, None, None
-
-    #     largest_contour = max(contours, key=cv2.contourArea)
-    #     if cv2.contourArea(largest_contour) < 50:
-    #         return None, None, None
-
-    #     M = cv2.moments(largest_contour)
-    #     if M["m00"] > 0:
-    #         return int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]), largest_contour
-    #     return None, None, None
-
     def _detect_object(self, cv_image):
-        results = self.model(cv_image, verbose=False)
+        results = self.model(cv_image, conf=0.02, imgsz=640, verbose=False)
 
         for result in results:
             boxes = result.boxes
-            if len(boxes) > 0:
-                for box_data in boxes:
-                    conf = float(box_data.conf[0].cpu().numpy())
-                    # Only accept objects with > 50% confidence
-                    if conf > 0.50:
-                        box = box_data.xyxy[0].cpu().numpy()
-                        x1, y1, x2, y2 = (
-                            int(box[0]),
-                            int(box[1]),
-                            int(box[2]),
-                            int(box[3]),
-                        )
+            if len(boxes) == 0:
+                continue
 
-                        # Filter out massive bounding boxes (like the robot arm)
-                        box_area = (x2 - x1) * (y2 - y1)
-                        image_area = cv_image.shape[0] * cv_image.shape[1]
+            for box_data in boxes:
+                box = box_data.xyxy[0].cpu().numpy()
+                x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
 
-                        if box_area < (
-                            image_area * 0.2
-                        ):  # Object must be smaller than 20% of the screen
-                            x_center = int((x1 + x2) / 2)
-                            y_center = int((y1 + y2) / 2)
-                            contour = np.array(
-                                [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.int32
-                            )
-                            return x_center, y_center, contour
+                # 1. Ignore massive boxes (robot arm / table)
+                box_area = (x2 - x1) * (y2 - y1)
+                image_area = cv_image.shape[0] * cv_image.shape[1]
+                if box_area >= (image_area * 0.15) or box_area < 50:
+                    continue
+
+                # 2. Verify the box actually contains the red cube
+                crop = cv_image[max(0, y1) : max(0, y2), max(0, x1) : max(0, x2)]
+                if crop.size == 0:
+                    continue
+                hsv_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+                m1 = cv2.inRange(
+                    hsv_crop, np.array([0, 70, 50]), np.array([15, 255, 255])
+                )
+                m2 = cv2.inRange(
+                    hsv_crop, np.array([160, 70, 50]), np.array([179, 255, 255])
+                )
+                red_ratio = np.count_nonzero(cv2.bitwise_or(m1, m2)) / (
+                    crop.shape[0] * crop.shape[1]
+                )
+
+                if red_ratio < 0.15:
+                    continue
+
+                x_center = int((x1 + x2) / 2)
+                y_center = int((y1 + y2) / 2)
+                contour = np.array(
+                    [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.int32
+                )
+
+                cls_name = result.names[int(box_data.cls[0])]
+                conf = float(box_data.conf[0])
+                cv2.putText(
+                    cv_image,
+                    f"{cls_name} {conf:.2f}",
+                    (x1, y1 - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 0),
+                    1,
+                )
+                return x_center, y_center, contour
 
         return None, None, None
 
