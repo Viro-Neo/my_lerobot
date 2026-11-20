@@ -64,9 +64,7 @@ class SO101Sim:
         self._joint_qpos_adr = {
             name: self.model.joint(name).qposadr[0] for name in ALL_JOINTS
         }
-        self._actuator_id = {
-            name: self.model.actuator(name).id for name in ALL_JOINTS
-        }
+        self._actuator_id = {name: self.model.actuator(name).id for name in ALL_JOINTS}
         g_jnt = self.model.joint(GRIPPER)
         self._gripper_range = (float(g_jnt.range[0]), float(g_jnt.range[1]))
 
@@ -124,16 +122,62 @@ class SO101Sim:
         self._renderer.update_scene(self.data, camera=self.camera_name)
         return self._renderer.render()
 
-    def randomize_object(self, radius_range=(0.18, 0.30), angle_range_deg=(-50, 60)) -> None:
-        """Moves pickup_object to a reachable position, with a random yaw."""
-        r = self._rng.uniform(*radius_range)
-        a = np.radians(self._rng.uniform(*angle_range_deg))
-        yaw = self._rng.uniform(0, np.pi / 2)  # the cube is invariant under 90° rotation
+    # def randomize_object(self, radius_range=(0.18, 0.30), angle_range_deg=(-50, 60)) -> None:
+    #     """Moves pickup_object to a reachable position, with a random yaw."""
+    #     r = self._rng.uniform(*radius_range)
+    #     a = np.radians(self._rng.uniform(*angle_range_deg))
+    #     yaw = self._rng.uniform(0, np.pi / 2)  # the cube is invariant under 90° rotation
+    #     adr = self.model.joint("pickup_object_free").qposadr[0]
+    #     self.data.qpos[adr : adr + 3] = [r * np.cos(a), r * np.sin(a), 0.03]
+    #     self.data.qpos[adr + 3 : adr + 7] = [np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
+    #     self.data.qvel[:] = 0
+    #     # let the object settle on the ground (physics settling)
+    #     for _ in range(200):
+    #         mujoco.mj_step(self.model, self.data)
+
+    def randomize_object(
+        self, radius_range=(0.18, 0.30), angle_range_deg=(-50, 60)
+    ) -> None:
+        """Moves pickup_object (and pickup_object_blue if present) to random reachable positions."""
+
+        def _sample_xy():
+            r = self._rng.uniform(*radius_range)
+            a = np.radians(self._rng.uniform(*angle_range_deg))
+            return np.array([r * np.cos(a), r * np.sin(a)])
+
+        # 1. Randomize red cube
+        pos_red = _sample_xy()
+        yaw_red = self._rng.uniform(0, np.pi / 2)
         adr = self.model.joint("pickup_object_free").qposadr[0]
-        self.data.qpos[adr : adr + 3] = [r * np.cos(a), r * np.sin(a), 0.03]
-        self.data.qpos[adr + 3 : adr + 7] = [np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
+        self.data.qpos[adr : adr + 3] = [pos_red[0], pos_red[1], 0.03]
+        self.data.qpos[adr + 3 : adr + 7] = [
+            np.cos(yaw_red / 2),
+            0,
+            0,
+            np.sin(yaw_red / 2),
+        ]
+
+        # 2. Randomize blue cube if present in the scene (Phase 2)
+        blue_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_JOINT, "pickup_object_blue_free"
+        )
+        if blue_id != -1:
+            pos_blue = _sample_xy()
+            for _ in range(50):
+                if np.linalg.norm(pos_blue - pos_red) >= 0.08:
+                    break
+                pos_blue = _sample_xy()
+            yaw_blue = self._rng.uniform(0, np.pi / 2)
+            adr_b = self.model.joint("pickup_object_blue_free").qposadr[0]
+            self.data.qpos[adr_b : adr_b + 3] = [pos_blue[0], pos_blue[1], 0.03]
+            self.data.qpos[adr_b + 3 : adr_b + 7] = [
+                np.cos(yaw_blue / 2),
+                0,
+                0,
+                np.sin(yaw_blue / 2),
+            ]
+
         self.data.qvel[:] = 0
-        # let the object settle on the ground (physics settling)
         for _ in range(200):
             mujoco.mj_step(self.model, self.data)
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """driver_node.py - ROS2 driver of the SO-ARM101."""
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -10,7 +11,7 @@ from cv_bridge import CvBridge
 from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
 from rclpy.executors import ExternalShutdownException
 from sensor_msgs.msg import CameraInfo, Image, JointState
-from so101_sim import SO101Sim
+from so101_sim import ASSETS_DIR, SO101Sim
 
 JOINT_NAMES = [
     "shoulder_pan",
@@ -29,6 +30,8 @@ GRIPPER_RANGE_RAD = (-0.174533, 1.74533)
 # Calibration file of the real arm, mounted by docker compose (CALIBRATION_FILE in docker/.env).
 CALIBRATION_FILE = Path("/calibration/arm.json")
 DEFAULT_PORT = "/dev/ttyACM0"
+PHASE = os.environ.get("PHASE", "1")
+SCENE = ASSETS_DIR / ("scene_phase2.xml" if PHASE == "2" else "scene_tek5.xml")
 
 CONTROL_HZ = 50.0
 JOINT_STATE_HZ = 30.0
@@ -53,9 +56,7 @@ class DriverNode(rclpy.node.Node):
 
         self._robot = self._connect_arm(port)
         self.get_logger().info(f"Robot connected: {type(self._robot).__name__}")
-        self.get_logger().info(f"Obs: {self._robot.get_observation()}")
-
-        self.get_logger().info(f"Trad: {list(self._robot.get_observation().values())}")
+        self.get_logger().info(f"Phase in use: {PHASE}")
 
         self._joint_pub = self.create_publisher(JointState, "/joint_states", 10)
         self._joint_sub = self.create_subscription(
@@ -89,7 +90,7 @@ class DriverNode(rclpy.node.Node):
     def _connect_arm(self, port: str = DEFAULT_PORT) -> SO101Sim | SO101Follower:
         """Creates and connects the backend chosen by use_sim (provided)."""
         if self._use_sim:
-            robot = SO101Sim()
+            robot = SO101Sim(scene_path=SCENE)
             robot.connect()
             return robot
 

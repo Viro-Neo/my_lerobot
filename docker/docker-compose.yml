@@ -16,6 +16,7 @@ x-ros-env: &ros-env
   ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
   FASTDDS_BUILTIN_TRANSPORTS: LARGE_DATA
   USE_SIM: ${USE_SIM:-true}
+  PHASE: ${PHASE:-1}
 
 services:
   control:
