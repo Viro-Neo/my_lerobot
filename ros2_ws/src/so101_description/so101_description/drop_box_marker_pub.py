@@ -1,14 +1,17 @@
 """
 drop_box_marker_pub.py
 
-Subscribes to /drop_box_position (PoseStamped) and publishes a
-semi-transparent red Cube marker on /drop_box_marker for RViz.
+Phase 1: Publishes /drop_box_marker and /object_marker from /drop_box_position and /object_position.
+Phase 2: Publishes a MarkerArray on /phase2/markers with both colored drop boxes and both cubes.
 """
 
+import os
+
 import rclpy
+from builtin_interfaces.msg import Duration
 from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
-from visualization_msgs.msg import Marker
+from visualization_msgs.msg import Marker, MarkerArray
 
 
 class DropBoxMarkerPublisher(Node):
@@ -16,6 +19,9 @@ class DropBoxMarkerPublisher(Node):
 
     def __init__(self) -> None:
         super().__init__("drop_box_marker_pub")
+        self._phase = os.environ.get("PHASE", "1")
+
+        # --- PHASE 1 MARKERS (unchanged) ---
         self._sub = self.create_subscription(
             PoseStamped, "drop_box_position", self._cb_box_position, 10
         )
@@ -56,6 +62,18 @@ class DropBoxMarkerPublisher(Node):
         self._marker_obj.color.b = 0.0
         self._marker_obj.color.a = 1.0  # Solid color
 
+        # --- PHASE 2 MARKERS (Red & Blue boxes + Red & Blue cubes) ---
+        if self._phase == "2":
+            self._p2_pub = self.create_publisher(MarkerArray, "/phase2/markers", 10)
+            self.create_subscription(
+                PoseStamped, "/phase2/red_cube_position", self._cb_p2_red, 10
+            )
+            self.create_subscription(
+                PoseStamped, "/phase2/blue_cube_position", self._cb_p2_blue, 10
+            )
+            # Publish static drop boxes at 2 Hz so late-joining RViz sessions always see them
+            self.create_timer(0.5, self._publish_p2_boxes)
+
     def _cb_box_position(self, msg: PoseStamped) -> None:
         self._marker.header.stamp = self.get_clock().now().to_msg()
         self._marker.header.frame_id = "base_link"
@@ -66,10 +84,86 @@ class DropBoxMarkerPublisher(Node):
         self._marker_obj.header.stamp = self.get_clock().now().to_msg()
         self._marker_obj.header.frame_id = "base_link"
         self._marker_obj.pose = msg.pose
-
-        # Ensure the visual marker sits exactly on the table (Z = 0.025 for a 5cm cube)
-        self._marker_obj.pose.position.z = 0.025
+        # self._marker_obj.pose.position.z = 0.025
         self._pub_obj.publish(self._marker_obj)
+
+    def _make_cube_marker(
+        self,
+        marker_id: int,
+        ns: str,
+        scale: tuple,
+        rgba: tuple,
+        xyz: tuple,
+        lifetime_sec: int,
+    ) -> Marker:
+        m = Marker()
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.header.frame_id = "base_link"
+        m.ns = ns
+        m.id = marker_id
+        m.type = Marker.CUBE
+        m.action = Marker.ADD
+        m.pose.position.x = float(xyz[0])
+        m.pose.position.y = float(xyz[1])
+        m.pose.position.z = float(xyz[2])
+        m.pose.orientation.w = 1.0
+        m.scale.x, m.scale.y, m.scale.z = scale
+        m.color.r, m.color.g, m.color.b, m.color.a = rgba
+        m.lifetime = Duration(sec=lifetime_sec)
+        return m
+
+    def _publish_p2_boxes(self) -> None:
+        arr = MarkerArray()
+        # Positions match scene_phase2.xml: red at (0.05, -0.25), blue at (0.05, 0.25)
+        arr.markers.append(
+            self._make_cube_marker(
+                0,
+                "p2_boxes",
+                (0.10, 0.10, 0.05),
+                (0.85, 0.10, 0.15, 0.5),
+                (0.05, -0.25, 0.025),
+                0,
+            )
+        )
+        arr.markers.append(
+            self._make_cube_marker(
+                1,
+                "p2_boxes",
+                (0.10, 0.10, 0.05),
+                (0.10, 0.30, 0.85, 0.5),
+                (0.05, 0.25, 0.025),
+                0,
+            )
+        )
+        self._p2_pub.publish(arr)
+
+    def _cb_p2_red(self, msg: PoseStamped) -> None:
+        arr = MarkerArray()
+        arr.markers.append(
+            self._make_cube_marker(
+                2,
+                "p2_cubes",
+                (0.05, 0.05, 0.05),
+                (1.0, 0.0, 0.0, 1.0),
+                (msg.pose.position.x, msg.pose.position.y, 0.025),
+                1,
+            )
+        )
+        self._p2_pub.publish(arr)
+
+    def _cb_p2_blue(self, msg: PoseStamped) -> None:
+        arr = MarkerArray()
+        arr.markers.append(
+            self._make_cube_marker(
+                3,
+                "p2_cubes",
+                (0.05, 0.05, 0.05),
+                (0.1, 0.4, 1.0, 1.0),
+                (msg.pose.position.x, msg.pose.position.y, 0.025),
+                1,
+            )
+        )
+        self._p2_pub.publish(arr)
 
 
 def main(args=None):

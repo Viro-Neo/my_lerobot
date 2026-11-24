@@ -10,6 +10,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     # Read the USE_SIM environment variable (defaults to false if not set)
     env_use_sim = os.environ.get("USE_SIM", "false").lower()
+    env_phase = os.environ.get("PHASE", "1")
     is_sim = env_use_sim == "true"
 
     # Choose the correct extrinsic matrices based on USE_SIM
@@ -69,7 +70,9 @@ def generate_launch_description():
             ),
             Node(
                 package="so101_perception",
-                executable="yolo_perception_node",
+                executable="yolo_sort_perception_node"
+                if env_phase == "2"
+                else "yolo_perception_node",
                 name="yolo_perception_node",
                 output="screen",
                 parameters=[

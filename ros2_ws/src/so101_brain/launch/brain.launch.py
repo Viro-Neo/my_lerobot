@@ -22,5 +22,12 @@ def generate_launch_description():
                     {"use_sim": is_sim},
                 ],
             ),
+            Node(
+                package="so101_brain",
+                executable="brain_phase2",
+                name="so101_brain_phase2",
+                output="screen",
+                parameters=[{"use_sim": is_sim}],
+            ),
         ]
     )
