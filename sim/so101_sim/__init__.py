@@ -122,31 +122,62 @@ class SO101Sim:
         self._renderer.update_scene(self.data, camera=self.camera_name)
         return self._renderer.render()
 
-    # def randomize_object(self, radius_range=(0.18, 0.30), angle_range_deg=(-50, 60)) -> None:
-    #     """Moves pickup_object to a reachable position, with a random yaw."""
-    #     r = self._rng.uniform(*radius_range)
-    #     a = np.radians(self._rng.uniform(*angle_range_deg))
-    #     yaw = self._rng.uniform(0, np.pi / 2)  # the cube is invariant under 90° rotation
-    #     adr = self.model.joint("pickup_object_free").qposadr[0]
-    #     self.data.qpos[adr : adr + 3] = [r * np.cos(a), r * np.sin(a), 0.03]
-    #     self.data.qpos[adr + 3 : adr + 7] = [np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
-    #     self.data.qvel[:] = 0
-    #     # let the object settle on the ground (physics settling)
-    #     for _ in range(200):
-    #         mujoco.mj_step(self.model, self.data)
+        # def randomize_object(self, radius_range=(0.18, 0.30), angle_range_deg=(-50, 60)) -> None:
+        #     """Moves pickup_object to a reachable position, with a random yaw."""
+        #     r = self._rng.uniform(*radius_range)
+        #     a = np.radians(self._rng.uniform(*angle_range_deg))
+        #     yaw = self._rng.uniform(0, np.pi / 2)  # the cube is invariant under 90° rotation
+        #     adr = self.model.joint("pickup_object_free").qposadr[0]
+        #     self.data.qpos[adr : adr + 3] = [r * np.cos(a), r * np.sin(a), 0.03]
+        #     self.data.qpos[adr + 3 : adr + 7] = [np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
+        #     self.data.qvel[:] = 0
+        #     # let the object settle on the ground (physics settling)
+        #     for _ in range(200):
+        #         mujoco.mj_step(self.model, self.data)
 
     def randomize_object(
-        self, radius_range=(0.18, 0.30), angle_range_deg=(-50, 60)
+        self,
+        radius_range=(0.18, 0.30),
+        angle_range_deg=(-50, 60),
+        min_cube_dist=0.10,  # Min center-to-center distance between cubes (meters)
+        min_box_dist=0.12,  # Min center-to-center distance from any drop box (meters)
     ) -> None:
         """Moves pickup_object (and pickup_object_blue if present) to random reachable positions."""
 
-        def _sample_xy():
+        # Collect XY positions of all drop boxes present in the loaded scene
+        box_positions = []
+        for box_name in ("drop_box", "drop_box_blue"):
+            if mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, box_name) != -1:
+                box_positions.append(self.data.body(box_name).xpos[:2].copy())
+
+        def _is_valid(pos, other_cubes):
+            # Must be far enough from every drop box
+            for b_pos in box_positions:
+                if np.linalg.norm(pos - b_pos) < min_box_dist:
+                    return False
+            # Must be far enough from already-placed cubes
+            for c_pos in other_cubes:
+                if np.linalg.norm(pos - c_pos) < min_cube_dist:
+                    return False
+            return True
+
+        def _sample_valid_xy(other_cubes, max_tries=200):
+            for _ in range(max_tries):
+                r = self._rng.uniform(*radius_range)
+                a = np.radians(self._rng.uniform(*angle_range_deg))
+                pos = np.array([r * np.cos(a), r * np.sin(a)])
+                if _is_valid(pos, other_cubes):
+                    return pos
+            # Fallback if constraints are too tight
             r = self._rng.uniform(*radius_range)
             a = np.radians(self._rng.uniform(*angle_range_deg))
             return np.array([r * np.cos(a), r * np.sin(a)])
 
+        placed_cubes = []
+
         # 1. Randomize red cube
-        pos_red = _sample_xy()
+        pos_red = _sample_valid_xy(placed_cubes)
+        placed_cubes.append(pos_red)
         yaw_red = self._rng.uniform(0, np.pi / 2)
         adr = self.model.joint("pickup_object_free").qposadr[0]
         self.data.qpos[adr : adr + 3] = [pos_red[0], pos_red[1], 0.03]
@@ -162,11 +193,8 @@ class SO101Sim:
             self.model, mujoco.mjtObj.mjOBJ_JOINT, "pickup_object_blue_free"
         )
         if blue_id != -1:
-            pos_blue = _sample_xy()
-            for _ in range(50):
-                if np.linalg.norm(pos_blue - pos_red) >= 0.08:
-                    break
-                pos_blue = _sample_xy()
+            pos_blue = _sample_valid_xy(placed_cubes)
+            placed_cubes.append(pos_blue)
             yaw_blue = self._rng.uniform(0, np.pi / 2)
             adr_b = self.model.joint("pickup_object_blue_free").qposadr[0]
             self.data.qpos[adr_b : adr_b + 3] = [pos_blue[0], pos_blue[1], 0.03]

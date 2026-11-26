@@ -92,7 +92,7 @@
             <geom type="box" size="0.002 0.05 0.025" pos="-0.05 0 0.025" material="blue_box_mat" />
         </body>
 
-        <camera name="external_cam" pos="0.45 0.25 0.35" xyaxes="-0.707 0.707 0 -0.354 -0.354 0.866"
+        <camera name="external_cam" pos="0.55 0.35 0.35" xyaxes="-0.707 0.707 0 -0.354 -0.354 0.866"
             fovy="65" />
     </worldbody>
 </mujoco>

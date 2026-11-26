@@ -63,9 +63,9 @@ class BrainPhase2Node(rclpy.node.Node):
         self.current_color = None
         self.current_target_pos = None
 
-        # Drop positions matching scene_phase2.xml
-        self.drop_pos_red = np.array([0.10, -0.20, 0.15])
-        self.drop_pos_blue = np.array([0.10, 0.20, 0.15])
+        # Drop positions matching scene_phase2.xml, aim directly for the center of each drop box
+        self.drop_pos_red = np.array([0.05, -0.25, 0.12])
+        self.drop_pos_blue = np.array([0.05, 0.25, 0.12])
         self.home_pos = np.array([0.15, 0.0, 0.15])
 
         qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
@@ -173,6 +173,13 @@ class BrainPhase2Node(rclpy.node.Node):
         self.state_transition_time = time.time()
         self.get_logger().info(f"[Phase2 - {self.current_color}] -> {self.state.name}")
 
+    def _reached_target(self, target_pos, tol=0.010):
+        """Returns True if the end-effector is within `tol` meters of `target_pos`."""
+        pin.forwardKinematics(self.model, self.data, self.q_current)
+        pin.updateFramePlacements(self.model, self.data)
+        ee_pos = self.data.oMf[self.ee_frame_id].translation
+        return np.linalg.norm(ee_pos - target_pos) < tol
+
     def _state_machine_step(self):
         if self.model is None:
             return
@@ -199,28 +206,28 @@ class BrainPhase2Node(rclpy.node.Node):
             target = self.current_target_pos.copy()
             target[2] += 0.15
             self.send_joint_command(self.solve_ik(target), gripper_pct=50.0)
-            if elapsed > 5.0:
+            if self._reached_target(target) or elapsed > 6.0:
                 self._transition(SortState.DESCEND)
 
         elif self.state == SortState.DESCEND:
             target = self.current_target_pos.copy()
             target[2] += self.grasp_z_offset
             self.send_joint_command(self.solve_ik(target), gripper_pct=50.0)
-            if elapsed > 5.0:
+            if self._reached_target(target, tol=0.005) or elapsed > 6.0:
                 self._transition(SortState.GRASP)
 
         elif self.state == SortState.GRASP:
             target = self.current_target_pos.copy()
             target[2] += self.grasp_z_offset
             self.send_joint_command(self.solve_ik(target), gripper_pct=0.0)
-            if elapsed > 5.0:
+            if elapsed > 6:
                 self._transition(SortState.LIFT)
 
         elif self.state == SortState.LIFT:
             target = self.current_target_pos.copy()
             target[2] += 0.15
             self.send_joint_command(self.solve_ik(target), gripper_pct=0.0)
-            if elapsed > 5.0:
+            if self._reached_target(target) or elapsed > 6.0:
                 self._transition(SortState.MOVE_DROP)
 
         elif self.state == SortState.MOVE_DROP:
@@ -228,26 +235,33 @@ class BrainPhase2Node(rclpy.node.Node):
                 self.drop_pos_red if self.current_color == "red" else self.drop_pos_blue
             )
             self.send_joint_command(self.solve_ik(drop_pos), gripper_pct=0.0)
-            if elapsed > 6.0:
+            if self._reached_target(drop_pos, tol=0.005) or elapsed > 10.0:
                 self._transition(SortState.RELEASE)
 
         elif self.state == SortState.RELEASE:
-            release_target = (
-                self.drop_pos_red.copy()
-                if self.current_color == "red"
-                else self.drop_pos_blue.copy()
+            # release_target = (
+            #     self.drop_pos_red.copy()
+            #     if self.current_color == "red"
+            #     else self.drop_pos_blue.copy()
+            # )
+            # release_target[0] -= 0.03
+            # release_target[1] += -0.03 if self.current_color == "red" else 0.03
+            # q_target = self.solve_ik(release_target)
+            # q_target[3] += 0.3
+            # self.send_joint_command(q_target, gripper_pct=50.0)
+            # Hold the exact same drop position—just open the gripper
+            drop_pos = (
+                self.drop_pos_red if self.current_color == "red" else self.drop_pos_blue
             )
-            release_target[0] -= 0.03
-            release_target[1] += -0.03 if self.current_color == "red" else 0.03
-            q_target = self.solve_ik(release_target)
-            q_target[3] += 0.3
+            q_target = self.solve_ik(drop_pos)
+            q_target[3] += 0.3  # Pitch wrist to tip the cube off the jaw
             self.send_joint_command(q_target, gripper_pct=50.0)
-            if elapsed > 5.0:
+            if elapsed > 5:
                 self._transition(SortState.HOME)
 
         elif self.state == SortState.HOME:
             self.send_joint_command(self.solve_ik(self.home_pos), gripper_pct=50.0)
-            if elapsed > 5.0:
+            if self._reached_target(self.home_pos) or elapsed > 6.0:
                 if self.current_color == "red":
                     self.red_done = True
                     self.red_pos = None

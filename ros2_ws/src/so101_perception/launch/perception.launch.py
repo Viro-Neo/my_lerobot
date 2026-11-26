@@ -14,7 +14,11 @@ def generate_launch_description():
     is_sim = env_use_sim == "true"
 
     # Choose the correct extrinsic matrices based on USE_SIM
-    cam_pos = [0.45, 0.25, 0.35] if is_sim else [0.1295, -0.5699, 0.4229]
+    if is_sim:
+        cam_pos = [0.55, 0.35, 0.35] if env_phase == "2" else [0.45, 0.25, 0.35]
+    else:
+        cam_pos = [0.1295, -0.5699, 0.4229]
+
     cam_xyaxes = (
         [-0.707, 0.707, 0.0, -0.354, -0.354, 0.866]
         if is_sim
